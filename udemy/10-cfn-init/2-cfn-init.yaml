@@ -23,10 +23,17 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
 
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
 Resources:
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      VpcId: !Ref VpcId
       GroupDescription: Enable HTTP access via port 80 and SSH access via port 22
       SecurityGroupIngress:
       - IpProtocol: tcp
@@ -44,18 +51,44 @@ Resources:
       Comment: Install a simple PHP application
       AWS::CloudFormation::Init:
         config:
+
+          # Install Required Packages
           packages:
             yum:
+              # Install latest version of "httpd" and "php"
               httpd: []
               php: []
+
+          # Create the required groups
           groups:
+            # Creates the "apache" group with a random GID
             apache: {}
+            # Creates the group "group2" with the GID 45
+            group2:
+              gid: "45"
+
+          # Create the required Users
           users:
-            "apache":
+            # Creates the "apache" user in the group "apache"
+            apache:
               groups:
-                - "apache"
+                - apache
+            # Create the "user2" user with the UID 50 in the group "group2"
+            user2:
+              # Attach the user to the group "group2"
+              groups:
+                - group2
+              # Set the UID of the user
+              uid: "50"
+              # Set the Home Directory of the user
+              homeDir: "/custom/home/dir"
+
+          # Download an archive and unpack into the directory (Supports: tar, tar+gz, tar+bz2, zip)
           sources:
+            # In the directory "/home/ec2-user/aws-cli" download and unpack the information from "https://github.com/aws/aws-cli/tarball/master"
             "/home/ec2-user/aws-cli": "https://github.com/aws/aws-cli/tarball/master"
+
+          # Here we can specify the files that the server needs. This can be use for configuration files. It can also pull files from external sources such as HTTP/HTTPS and even S3 Buckets
           files:
             "/tmp/cwlogs/apacheaccess.conf":
               content: !Sub |
@@ -96,10 +129,14 @@ Resources:
               group: "root"
             # Fetch a webpage from a private S3 bucket
             "/var/www/html/webpage.html":
+              # Using the "!Sub" function will substitute anything starting with "${" with the applicable Parameters or Pseudo-variables or Others
               source: !Sub "https://${MyS3BucketName}.s3.${AWS::Region}.amazonaws.com/webpage.html"
+              # Setting the file permissions
               mode: '000644'
+              # Setting the file owner/group
               owner: apache
               group: apache
+              # Specifying the IAM role for pulling the file
               authentication: S3AccessCreds
           commands:
             test:
@@ -121,6 +158,7 @@ Resources:
                 files:
                   - "/etc/cfn/cfn-hup.conf"
                   - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+      # Setting an IAM role for the EC2 instance
       AWS::CloudFormation::Authentication:
         # Define S3 access credentials
         S3AccessCreds:
@@ -136,6 +174,7 @@ Resources:
       ImageId: !Ref ImageId
       KeyName: !Ref KeyName
       InstanceType: t2.micro
+      SubnetId: !Ref SubnetId
       IamInstanceProfile: !Ref InstanceProfile # Reference Instance Profile
       SecurityGroups:
       - !Ref WebServerSecurityGroup
@@ -153,7 +192,7 @@ Resources:
             # cfn-init completed so signal success or not
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebServerHost --region ${AWS::Region}
           
-
+  # Creating an IAM role to allow the EC2 application to pull objects from a Bucket
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:

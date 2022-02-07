@@ -30,6 +30,9 @@ Resources:
       InstanceType: t2.micro
       KeyName: !Ref KeyName
       SubnetId: !Ref SubnetId
+      Tags:
+        - Key: Name
+          Value: DemoEc2UserData
       SecurityGroupIds:
         - !Ref WebServerSecurityGroup
       UserData:

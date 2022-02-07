@@ -49,6 +49,9 @@ Resources:
     Type: AWS::EC2::Instance
     Metadata:
       Comment: Install a simple PHP application
+      # Using CloudFormation Init to make complex ec2 scripts more user readable and easier to deploy
+      # CloudFormation launches the Instance and then the instnace calls cfn-init to pull the init data from CloudFormation. Logs go to `/var/log/cfn-init.log`
+      # After cfn-init we run cfn-signal to tell CloudFormation whether or not the cfn-init script completed or failed.
       AWS::CloudFormation::Init:
         config:
 
@@ -88,9 +91,10 @@ Resources:
             # In the directory "/home/ec2-user/aws-cli" download and unpack the information from "https://github.com/aws/aws-cli/tarball/master"
             "/home/ec2-user/aws-cli": "https://github.com/aws/aws-cli/tarball/master"
 
-          # Here we can specify the files that the server needs. This can be use for configuration files. It can also pull files from external sources such as HTTP/HTTPS and even S3 Buckets
+          # You can write files to put into the EC2 instance inline or pull them from a URL or even a S3 Bucket
           files:
             "/tmp/cwlogs/apacheaccess.conf":
+              # We can use !Sub here to substitute values from CloudFormation into the file! Make sure the format is ${value}
               content: !Sub |
                 [general]
                 state_file= /var/awslogs/agent-state
@@ -110,6 +114,7 @@ Resources:
               mode: '000644'
               owner: apache
               group: apache
+            # Setting up cfn-hup ()
             "/etc/cfn/cfn-hup.conf":
               content: !Sub |
                 [main]
@@ -129,7 +134,7 @@ Resources:
               group: "root"
             # Fetch a webpage from a private S3 bucket
             "/var/www/html/webpage.html":
-              # Using the "!Sub" function will substitute anything starting with "${" with the applicable Parameters or Pseudo-variables or Others
+              # Using the "!Sub" function will substitute anything starting with "${" with the applicable Parameters, References, or Pseudo-variables
               source: !Sub "https://${MyS3BucketName}.s3.${AWS::Region}.amazonaws.com/webpage.html"
               # Setting the file permissions
               mode: '000644'
@@ -138,26 +143,40 @@ Resources:
               group: apache
               # Specifying the IAM role for pulling the file
               authentication: S3AccessCreds
+
+          # Runs commands, 1 at a time, in alphabetical order. Ran after the file section
+          # You could use this with Files to execute a script of commands. Only use if you can't do this with files, groups, users, or packages.
           commands:
             test:
+              # Running a command (uses Environment Variables)
               command: "echo \"$MAGIC\" > test.txt"
+              # Setting Environment Variables for the execution
               env:
                 MAGIC: "I come from the environment!"
+              # Setting the Current Working Directory
               cwd: "~"
+              # Testing to see if the file exists
+              test: test ! -e ~/test.txt
+
+          # Launch Services after the EC2 instance is launched using sysvinit 
           services:
             sysvinit:
+              # Enable and Run a Service
               httpd:
                 enabled: 'true'
                 ensureRunning: 'true'
+              # Stop and Disable a service
               postfix:
                 enabled: 'false'
                 ensureRunning: 'false'
               cfn-hup:
                 enable: 'true'
                 ensureRunning: 'true'
+                # This section checks to see if the files are updated, if they are this restarts the service
                 files:
                   - "/etc/cfn/cfn-hup.conf"
                   - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+
       # Setting an IAM role for the EC2 instance
       AWS::CloudFormation::Authentication:
         # Define S3 access credentials
@@ -166,8 +185,10 @@ Resources:
           buckets:
             - !Sub ${MyS3BucketName}
           roleName: !Ref InstanceRole
+    # This is where we define how CloudFormation should wait for the cfn-init to complete
     CreationPolicy:
       ResourceSignal:
+        # Set the timeout of cfn-init to 15 minutes
         Timeout: PT15M
         
     Properties:
@@ -178,6 +199,7 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile # Reference Instance Profile
       SecurityGroups:
       - !Ref WebServerSecurityGroup
+      # We are passing some user data to run the cfn-init and cfn-signal command
       UserData:
         Fn::Base64:
           !Sub |
